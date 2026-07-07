@@ -2,7 +2,38 @@
 
 Used for: monitoring job-search threads (workflow 02), daily value posts (workflow 04).
 
-## App setup
+## API access status (as of 2026-07-07)
+
+Reddit ended self-service API key creation in late 2025 ("Responsible Builder Policy"). Attempting to create a script app directly at `reddit.com/prefs/apps` without prior registration now returns a 500. New applicants must submit a manual Developer Support request first:
+
+1. Go to https://old.reddit.com/wiki/api#wiki_read_the_full_api_terms_and_sign_up_for_usage
+2. Click "submit a request" → select **"I'm a Developer"** and **"I want to register to use the Reddit API"**
+3. Fill out the form (see "Developer Support application" below for the text submitted)
+4. Wait for manual review — approval is not guaranteed; Reddit favors established/commercial use cases with narrow scope and reportedly rejects small/marketing-flavored requests
+5. Only after approval, proceed to app creation below
+
+**Status: submitted, awaiting Reddit review.**
+
+## Bot account
+
+- Username: **u/JobFrank** (new dedicated account — confirm exact registered handle once created, in case of availability collision)
+- Disclosure: account bio discloses JobFrank affiliation (e.g. "Hi, I'm from JobFrank — here to help with resume/ATS questions"). Decided to disclose rather than run unaffiliated, per Reddit self-promotion rules and to reduce ban/API-rejection risk.
+
+## Developer Support application (submitted 2026-07-07)
+
+**Purpose/benefit to Redditors:** Helps surface and answer resume/job-application questions in job-search communities. Monitors a small set of subreddits for people explicitly asking for help and drafts a specific, useful reply. Every reply and post is reviewed and approved by a human before it's ever published.
+
+**Behavior description:** Monitor & reply (every 2 hours) searches fixed keyword list across target subreddits, drafts one reply per matched thread, held for human approval. Daily value post (once/day) generates one original tips post, held for approval, max one post per subreddit per day. No mass-replying, no link-only comments, no repeat posting to the same thread.
+
+**Why not Devvit:** Devvit apps run inside a single subreddit's sandbox for communities the developer manages. This needs cross-subreddit monitoring (subs we don't moderate), an external LLM call (Anthropic API) to draft replies, and an external human-approval queue — not supported by Devvit's single-subreddit app model.
+
+**Source code:** https://github.com/triple8labs/jobfrank-marketing
+
+**Subreddits:** r/cscareerquestions, r/jobs, r/resumes, r/jobsearchhacks
+
+**Username:** u/JobFrank
+
+## App setup (after Developer Support approval)
 
 1. Go to https://www.reddit.com/prefs/apps
 2. Create app → type: **script**
