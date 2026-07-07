@@ -1,0 +1,155 @@
+{
+  "name": "03 - LinkedIn Content Pipeline",
+  "nodes": [
+    {
+      "id": "a3000001-0000-0000-0000-000000000001",
+      "name": "Mon Wed Fri 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1,3,5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000002",
+      "name": "Pick Theme",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "parameters": {
+        "jsCode": "const day = new Date().getDay();\nconst themes = {\n  1: 'A practical job search tip or career insight. Focus on something actionable that most job seekers overlook.',\n  3: 'An insight about resume writing, ATS systems, or how hiring managers actually review applications.',\n  5: 'A JobFrank feature highlight or a short story about what honest resume tailoring looks like in practice.'\n};\nreturn [{ json: { theme: themes[day] || themes[1], day } }];"
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000003",
+      "name": "Generate Post with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 600,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a LinkedIn post for JobFrank (jobfrank.app — an AI resume tailoring tool that only uses confirmed user experience, never invents claims). Theme: {{ $json.theme }}. Style: direct, no fluff, no emojis, no hashtag spam. Max 3 short paragraphs. End with a soft CTA. Output only the post text.\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000004",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [950, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {"name": "postText", "type": "string", "stringValue": "={{ $json.content[0].text }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000005",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "parameters": {
+        "resume": "webhook"
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000006",
+      "name": "Check Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body?.approved }}",
+              "rightValue": false,
+              "operator": {"type": "boolean", "operation": "notEquals"}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000007",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1700, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.LINKEDIN_ACCESS_TOKEN }}"},
+            {"name": "LinkedIn-Version", "value": "202401"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Restli-Protocol-Version", "value": "2.0.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"author\": \"{{ $env.LINKEDIN_AUTHOR_URN }}\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": {{ JSON.stringify($('Extract Text').item.json.postText) }}\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}"
+      }
+    },
+    {
+      "id": "a3000001-0000-0000-0000-000000000008",
+      "name": "Discard",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1700, 400],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Mon Wed Fri 8am": {
+      "main": [[{"node": "Pick Theme", "type": "main", "index": 0}]]
+    },
+    "Pick Theme": {
+      "main": [[{"node": "Generate Post with Claude", "type": "main", "index": 0}]]
+    },
+    "Generate Post with Claude": {
+      "main": [[{"node": "Extract Text", "type": "main", "index": 0}]]
+    },
+    "Extract Text": {
+      "main": [[{"node": "Wait for Approval", "type": "main", "index": 0}]]
+    },
+    "Wait for Approval": {
+      "main": [[{"node": "Check Approved", "type": "main", "index": 0}]]
+    },
+    "Check Approved": {
+      "main": [
+        [{"node": "Post to LinkedIn", "type": "main", "index": 0}],
+        [{"node": "Discard", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

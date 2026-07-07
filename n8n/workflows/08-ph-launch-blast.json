@@ -1,0 +1,54 @@
+{
+  "name": "08 - Product Hunt Launch Blast",
+  "nodes": [
+    {
+      "id": "a8000001-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {}
+    },
+    {
+      "id": "a8000001-0000-0000-0000-000000000002",
+      "name": "Get Waitlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst emails = staticData.emails || [];\nconsole.log('Sending PH launch blast to ' + emails.length + ' subscribers');\nreturn emails.map(email => ({ json: { email } }));"
+      }
+    },
+    {
+      "id": "a8000001-0000-0000-0000-000000000003",
+      "name": "Send Launch Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "JobFrank is live on Product Hunt today",
+        "emailType": "html",
+        "message": "<p>Today is the day.</p><p>JobFrank is live on Product Hunt and your support means everything. If you have 30 seconds, an upvote helps us reach more job seekers.</p><p><a href='https://www.producthunt.com/posts/jobfrank'>Vote for JobFrank on Product Hunt</a></p><p>The app is fully live. Paste any job description and resume — we tailor it in minutes using only your confirmed experience.</p><p><a href='https://jobfrank.app'>Try it now</a></p><p>Thank you for being here from the start.</p>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP (Mailpit / SES)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{"node": "Get Waitlist", "type": "main", "index": 0}]]
+    },
+    "Get Waitlist": {
+      "main": [[{"node": "Send Launch Email", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

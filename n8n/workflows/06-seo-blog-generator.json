@@ -1,0 +1,112 @@
+{
+  "name": "06 - SEO Blog Draft Generator",
+  "nodes": [
+    {
+      "id": "a6000001-0000-0000-0000-000000000001",
+      "name": "Webhook - Generate Blog",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "generate-blog-draft",
+      "parameters": {
+        "path": "generate-blog-draft",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "httpMethod": "POST"
+      }
+    },
+    {
+      "id": "a6000001-0000-0000-0000-000000000002",
+      "name": "Generate MDX with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 2000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a blog post in MDX format for jobfrank.app targeting the keyword: {{ $json.keyword }}. Intent: {{ $json.intent || 'informational' }}.\\n\\nUse exactly this frontmatter format:\\n---\\ntitle: \\\"...\\\"\\ndescription: \\\"...\\\"\\npublishedAt: \\\"{{ new Date().toISOString().split('T')[0] }}\\\"\\nslug: \\\"keyword-as-kebab-case\\\"\\ntags: [\\\"...\\\", \\\"...\\\"]\\n---\\n\\nWrite 600-900 words. Be direct and practical. End with a short section about how JobFrank helps. Output only the MDX — no explanation.\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a6000001-0000-0000-0000-000000000003",
+      "name": "Extract Slug and Build Filename",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "parameters": {
+        "jsCode": "const mdxContent = $input.first().json.content[0].text;\nconst slugMatch = mdxContent.match(/slug:\\s*[\"']([^\"']+)[\"']/);\nconst slug = slugMatch ? slugMatch[1] : $('Webhook - Generate Blog').first().json.keyword.toLowerCase().replace(/[^a-z0-9]+/g, '-');\nconst date = new Date().toISOString().split('T')[0];\nconst fileName = date + '-' + slug + '.mdx';\nreturn [{ json: { mdxContent, slug, fileName } }];"
+      }
+    },
+    {
+      "id": "a6000001-0000-0000-0000-000000000004",
+      "name": "Prepare Binary File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300],
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst mdxContent = item.json.mdxContent;\nconst fileName = item.json.fileName;\nconst binaryData = await this.helpers.prepareBinaryData(\n  Buffer.from(mdxContent, 'utf-8'),\n  fileName,\n  'text/plain'\n);\nreturn [{ json: item.json, binary: { data: binaryData } }];"
+      }
+    },
+    {
+      "id": "a6000001-0000-0000-0000-000000000005",
+      "name": "Write File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "parameters": {
+        "fileName": "=/home/node/blog-drafts/{{ $json.fileName }}",
+        "dataPropertyName": "data"
+      }
+    },
+    {
+      "id": "a6000001-0000-0000-0000-000000000006",
+      "name": "Email Draft Preview",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $env.ALERT_EMAIL }}",
+        "subject": "=[Blog Draft] {{ $('Extract Slug and Build Filename').item.json.fileName }}",
+        "emailType": "html",
+        "message": "=<p>Blog draft generated: <strong>{{ $('Extract Slug and Build Filename').item.json.fileName }}</strong></p><p>File saved to <code>n8n/blog-drafts/</code></p><hr><pre>{{ $('Extract Slug and Build Filename').item.json.mdxContent }}</pre>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP (Mailpit / SES)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Generate Blog": {
+      "main": [[{"node": "Generate MDX with Claude", "type": "main", "index": 0}]]
+    },
+    "Generate MDX with Claude": {
+      "main": [[{"node": "Extract Slug and Build Filename", "type": "main", "index": 0}]]
+    },
+    "Extract Slug and Build Filename": {
+      "main": [[{"node": "Prepare Binary File", "type": "main", "index": 0}]]
+    },
+    "Prepare Binary File": {
+      "main": [[{"node": "Write File", "type": "main", "index": 0}]]
+    },
+    "Write File": {
+      "main": [[{"node": "Email Draft Preview", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

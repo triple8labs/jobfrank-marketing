@@ -1,0 +1,220 @@
+{
+  "name": "02 - Reddit Monitor and Reply",
+  "nodes": [
+    {
+      "id": "a2000001-0000-0000-0000-000000000001",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 2}]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000002",
+      "name": "Get Reddit Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.reddit.com/api/v1/access_token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "User-Agent", "value": "JobFrankBot/1.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "grant_type", "value": "password"},
+            {"name": "username", "value": "={{ $env.REDDIT_USERNAME }}"},
+            {"name": "password", "value": "={{ $env.REDDIT_PASSWORD }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000003",
+      "name": "Search Keywords",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "https://oauth.reddit.com/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=bearer {{ $json.access_token }}"},
+            {"name": "User-Agent", "value": "JobFrankBot/1.0"}
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "q", "value": "tailor resume OR ATS rejection OR resume not getting interviews"},
+            {"name": "subreddit", "value": "jobs+cscareerquestions+resumes+jobsearchhacks"},
+            {"name": "sort", "value": "new"},
+            {"name": "limit", "value": "25"},
+            {"name": "type", "value": "comment,link"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000004",
+      "name": "Dedup and Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300],
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.processedIds) staticData.processedIds = [];\n\nconst posts = $input.first().json.data?.children || [];\nconst fresh = posts\n  .map(p => p.data)\n  .filter(p => p && p.id && !staticData.processedIds.includes(p.id))\n  .filter(p => {\n    const text = ((p.selftext || '') + ' ' + (p.title || '') + ' ' + (p.body || '')).toLowerCase();\n    const keywords = ['resume', 'ats', 'job application', 'tailor', 'interview'];\n    return keywords.some(k => text.includes(k));\n  })\n  .slice(0, 5);\n\nfresh.forEach(p => {\n  staticData.processedIds.push(p.id);\n  if (staticData.processedIds.length > 2000) staticData.processedIds.shift();\n});\n\nreturn fresh.map(p => ({ json: p }));"
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000005",
+      "name": "Generate Reply with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 400,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"You are a helpful job-search expert on Reddit. Write a genuine, helpful reply to this post. Be specific and actionable. At the end, naturally mention that JobFrank (jobfrank.app) can automate the resume tailoring step if they want a tool for it. Keep the reply under 150 words. Do not be salesy.\\n\\nPost title: {{ $json.title || '' }}\\nPost text: {{ ($json.selftext || $json.body || '').slice(0, 500) }}\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000006",
+      "name": "Prepare Approval",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1450, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {"name": "postId", "type": "string", "stringValue": "={{ $('Dedup and Filter').item.json.id }}"},
+            {"name": "postTitle", "type": "string", "stringValue": "={{ $('Dedup and Filter').item.json.title || '' }}"},
+            {"name": "subreddit", "type": "string", "stringValue": "={{ $('Dedup and Filter').item.json.subreddit }}"},
+            {"name": "replyText", "type": "string", "stringValue": "={{ $json.content[0].text }}"},
+            {"name": "redditToken", "type": "string", "stringValue": "={{ $('Get Reddit Token').item.json.access_token }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000007",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1700, 300],
+      "parameters": {
+        "resume": "webhook"
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000008",
+      "name": "Check Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1950, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body?.approved }}",
+              "rightValue": false,
+              "operator": {"type": "boolean", "operation": "notEquals"}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000009",
+      "name": "Post Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2200, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth.reddit.com/api/comment",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=bearer {{ $('Prepare Approval').item.json.redditToken }}"},
+            {"name": "User-Agent", "value": "JobFrankBot/1.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "api_type", "value": "json"},
+            {"name": "thing_id", "value": "=t3_{{ $('Prepare Approval').item.json.postId }}"},
+            {"name": "text", "value": "={{ $('Prepare Approval').item.json.replyText }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2000001-0000-0000-0000-000000000010",
+      "name": "Discard",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2200, 400],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [[{"node": "Get Reddit Token", "type": "main", "index": 0}]]
+    },
+    "Get Reddit Token": {
+      "main": [[{"node": "Search Keywords", "type": "main", "index": 0}]]
+    },
+    "Search Keywords": {
+      "main": [[{"node": "Dedup and Filter", "type": "main", "index": 0}]]
+    },
+    "Dedup and Filter": {
+      "main": [[{"node": "Generate Reply with Claude", "type": "main", "index": 0}]]
+    },
+    "Generate Reply with Claude": {
+      "main": [[{"node": "Prepare Approval", "type": "main", "index": 0}]]
+    },
+    "Prepare Approval": {
+      "main": [[{"node": "Wait for Approval", "type": "main", "index": 0}]]
+    },
+    "Wait for Approval": {
+      "main": [[{"node": "Check Approved", "type": "main", "index": 0}]]
+    },
+    "Check Approved": {
+      "main": [
+        [{"node": "Post Reply", "type": "main", "index": 0}],
+        [{"node": "Discard", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

@@ -1,0 +1,109 @@
+{
+  "name": "07 - Win-back Emails",
+  "nodes": [
+    {
+      "id": "a7000001-0000-0000-0000-000000000001",
+      "name": "Daily 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a7000001-0000-0000-0000-000000000002",
+      "name": "Fetch Inactive Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.JOBFRANK_URL }}/api/v1/internal/inactive-users",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.INTERNAL_API_TOKEN }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a7000001-0000-0000-0000-000000000003",
+      "name": "Split Users",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [700, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "a7000001-0000-0000-0000-000000000004",
+      "name": "Generate Winback Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [950, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 400,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a short, warm re-engagement email for a JobFrank user who has not logged in for {{ $json.days_inactive }} days. User name: {{ $json.name || 'there' }}. Last action: {{ $json.last_action }}. Keep it to 3 short paragraphs. No pressure, just helpful. End with a link placeholder [DASHBOARD_LINK]. Output only the email body as plain HTML paragraphs.\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a7000001-0000-0000-0000-000000000005",
+      "name": "Send Winback Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $('Split Users').item.json.email }}",
+        "subject": "Still job hunting? Your JobFrank dashboard is ready",
+        "emailType": "html",
+        "message": "={{ $json.content[0].text.replace('[DASHBOARD_LINK]', '<a href=\"https://jobfrank.app/dashboard\">Open your dashboard</a>') }}",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP (Mailpit / SES)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 9am": {
+      "main": [[{"node": "Fetch Inactive Users", "type": "main", "index": 0}]]
+    },
+    "Fetch Inactive Users": {
+      "main": [[{"node": "Split Users", "type": "main", "index": 0}]]
+    },
+    "Split Users": {
+      "main": [[{"node": "Generate Winback Email", "type": "main", "index": 0}]]
+    },
+    "Generate Winback Email": {
+      "main": [[{"node": "Send Winback Email", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

@@ -1,0 +1,224 @@
+{
+  "name": "09 - LinkedIn Job Seeker Ads",
+  "nodes": [
+    {
+      "id": "a9000001-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {}
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000002",
+      "name": "Set Ad Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {"name": "dailyBudgetCents", "type": "number", "numberValue": 1000},
+            {"name": "durationDays", "type": "number", "numberValue": 7},
+            {"name": "topic", "type": "string", "stringValue": "resume tailoring for job seekers who are actively applying"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000003",
+      "name": "Generate Ad Copy with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 600,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a LinkedIn Sponsored Content ad for JobFrank (jobfrank.app). Audience: people actively looking for jobs (Open to Work). Topic: {{ $json.topic }}.\\n\\nOutput a JSON object with exactly these fields:\\n- headline: under 70 characters, punchy, speaks to pain of generic resumes\\n- introText: 150-200 characters, practical and direct, no fluff\\n- cta: one of: Apply Now, Learn More, Sign Up, Get Started\\n- destinationUrl: https://jobfrank.app\\n\\nOutput only the JSON, no explanation.\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000004",
+      "name": "Parse Ad Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content[0].text;\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('Claude did not return valid JSON: ' + raw);\nconst ad = JSON.parse(match[0]);\nconst params = $('Set Ad Parameters').first().json;\nreturn [{ json: {\n  headline: ad.headline,\n  introText: ad.introText,\n  cta: ad.cta,\n  destinationUrl: ad.destinationUrl,\n  dailyBudgetCents: params.dailyBudgetCents,\n  durationDays: params.durationDays\n}}];"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000005",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "parameters": {
+        "resume": "webhook"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000006",
+      "name": "Check Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body?.approved }}",
+              "rightValue": false,
+              "operator": {"type": "boolean", "operation": "notEquals"}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000007",
+      "name": "Create Campaign Group if Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 200],
+      "parameters": {
+        "jsCode": "const groupId = $env.LINKEDIN_CAMPAIGN_GROUP_ID;\nconst adData = $('Parse Ad Copy').first().json;\n\nif (groupId) {\n  return [{ json: { ...adData, campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:' + groupId, skipGroupCreate: true } }];\n}\n\nreturn [{ json: { ...adData, skipGroupCreate: false } }];"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000008",
+      "name": "Create Campaign Group",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1950, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/adCampaignGroupsV2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.LINKEDIN_ACCESS_TOKEN }}"},
+            {"name": "LinkedIn-Version", "value": "202401"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Restli-Protocol-Version", "value": "2.0.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"account\": \"urn:li:sponsoredAccount:{{ $env.LINKEDIN_ACCOUNT_ID }}\",\n  \"name\": \"JobFrank - Job Seekers\",\n  \"status\": \"ACTIVE\",\n  \"runSchedule\": {\n    \"start\": {{ new Date().getTime() }}\n  }\n}"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000009",
+      "name": "Resolve Campaign Group URN",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 200],
+      "parameters": {
+        "jsCode": "const prev = $('Create Campaign Group if Needed').first().json;\nlet campaignGroupUrn = prev.campaignGroupUrn;\n\nif (!campaignGroupUrn) {\n  const created = $('Create Campaign Group').first().json;\n  const id = created.id || (created.headers && created.headers['x-linkedin-id']);\n  if (!id) throw new Error('Could not get campaign group ID from LinkedIn response: ' + JSON.stringify(created));\n  campaignGroupUrn = 'urn:li:sponsoredCampaignGroup:' + id;\n}\n\nreturn [{ json: { ...prev, campaignGroupUrn } }];"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000010",
+      "name": "Create Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2450, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/adCampaignsV2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.LINKEDIN_ACCESS_TOKEN }}"},
+            {"name": "LinkedIn-Version", "value": "202401"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Restli-Protocol-Version", "value": "2.0.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"account\": \"urn:li:sponsoredAccount:{{ $env.LINKEDIN_ACCOUNT_ID }}\",\n  \"campaignGroup\": \"{{ $json.campaignGroupUrn }}\",\n  \"name\": \"JobFrank OTW - {{ new Date().toISOString().split('T')[0] }}\",\n  \"status\": \"DRAFT\",\n  \"type\": \"SPONSORED_UPDATES\",\n  \"costType\": \"CPM\",\n  \"objectiveType\": \"LEAD_GENERATION\",\n  \"dailyBudget\": {\n    \"amount\": {{ $json.dailyBudgetCents }},\n    \"currencyCode\": \"USD\"\n  },\n  \"runSchedule\": {\n    \"start\": {{ new Date().getTime() }},\n    \"end\": {{ new Date(Date.now() + $json.durationDays * 86400000).getTime() }}\n  },\n  \"targetingCriteria\": {\n    \"include\": {\n      \"and\": [\n        {\n          \"or\": {\n            \"urn:li:adTargetingFacet:memberBehaviors\": [\n              \"{{ $env.LINKEDIN_JOB_SEEKER_URN }}\"\n            ]\n          }\n        },\n        {\n          \"or\": {\n            \"urn:li:adTargetingFacet:locations\": [\n              \"urn:li:geo:103644278\"\n            ]\n          }\n        }\n      ]\n    }\n  },\n  \"locale\": {\n    \"country\": \"US\",\n    \"language\": \"en\"\n  }\n}"
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000011",
+      "name": "Email Campaign Ready",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2700, 200],
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $env.ALERT_EMAIL }}",
+        "subject": "[Action Required] LinkedIn campaign created — add creative in Campaign Manager",
+        "emailType": "html",
+        "message": "=<h2>LinkedIn Job Seeker Campaign Created</h2><p>Campaign is in <strong>DRAFT</strong> status. Add the creative in Campaign Manager to activate it.</p><p><a href='https://www.linkedin.com/campaignmanager/accounts/{{ $env.LINKEDIN_ACCOUNT_ID }}/campaigns'>Open Campaign Manager</a></p><hr><h3>Approved Ad Copy</h3><p><strong>Headline:</strong> {{ $('Parse Ad Copy').item.json.headline }}</p><p><strong>Intro text:</strong> {{ $('Parse Ad Copy').item.json.introText }}</p><p><strong>CTA:</strong> {{ $('Parse Ad Copy').item.json.cta }}</p><p><strong>Destination:</strong> {{ $('Parse Ad Copy').item.json.destinationUrl }}</p><hr><p><strong>Budget:</strong> ${{ $('Parse Ad Copy').item.json.dailyBudgetCents / 100 }}/day for {{ $('Parse Ad Copy').item.json.durationDays }} days</p><p><strong>Targeting:</strong> Open to Work / Job Seekers — US</p>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP (Mailpit / SES)"
+        }
+      }
+    },
+    {
+      "id": "a9000001-0000-0000-0000-000000000012",
+      "name": "Discard",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1700, 400],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{"node": "Set Ad Parameters", "type": "main", "index": 0}]]
+    },
+    "Set Ad Parameters": {
+      "main": [[{"node": "Generate Ad Copy with Claude", "type": "main", "index": 0}]]
+    },
+    "Generate Ad Copy with Claude": {
+      "main": [[{"node": "Parse Ad Copy", "type": "main", "index": 0}]]
+    },
+    "Parse Ad Copy": {
+      "main": [[{"node": "Wait for Approval", "type": "main", "index": 0}]]
+    },
+    "Wait for Approval": {
+      "main": [[{"node": "Check Approved", "type": "main", "index": 0}]]
+    },
+    "Check Approved": {
+      "main": [
+        [{"node": "Create Campaign Group if Needed", "type": "main", "index": 0}],
+        [{"node": "Discard", "type": "main", "index": 0}]
+      ]
+    },
+    "Create Campaign Group if Needed": {
+      "main": [[{"node": "Create Campaign Group", "type": "main", "index": 0}]]
+    },
+    "Create Campaign Group": {
+      "main": [[{"node": "Resolve Campaign Group URN", "type": "main", "index": 0}]]
+    },
+    "Resolve Campaign Group URN": {
+      "main": [[{"node": "Create Campaign", "type": "main", "index": 0}]]
+    },
+    "Create Campaign": {
+      "main": [[{"node": "Email Campaign Ready", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

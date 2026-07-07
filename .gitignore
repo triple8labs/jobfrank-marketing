@@ -1,0 +1,5 @@
+.env
+*.env.local
+n8n/blog-drafts/*.mdx
+n8n/blog-drafts/*.md
+linkedin.md

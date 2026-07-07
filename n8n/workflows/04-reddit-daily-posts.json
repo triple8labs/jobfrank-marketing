@@ -1,0 +1,187 @@
+{
+  "name": "04 - Reddit Daily Value Posts",
+  "nodes": [
+    {
+      "id": "a4000001-0000-0000-0000-000000000001",
+      "name": "Daily 10am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000002",
+      "name": "Pick Subreddit and Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst day = now.getDay();\nconst week = Math.ceil(now.getDate() / 7);\n\nconst schedule = {\n  0: null,\n  1: { sub: 'cscareerquestions', flair: null },\n  2: { sub: 'jobs', flair: null },\n  3: { sub: 'resumes', flair: null },\n  4: { sub: 'cscareerquestions', flair: null },\n  5: { sub: 'jobs', flair: null },\n  6: { sub: 'jobsearchhacks', flair: null }\n};\n\nconst topics = [\n  'How to identify the 5 most important keywords in any job description in under 2 minutes',\n  'Why your resume gets past ATS but still fails the 30-second hiring manager scan',\n  'The difference between tailoring a resume and just stuffing keywords into it',\n  'How to quantify accomplishments when you do not have hard numbers',\n  'What a hiring manager actually reads in the first pass'\n];\n\nconst target = schedule[day];\nif (!target) return [];\n\nconst topic = topics[(week - 1) % topics.length];\nreturn [{ json: { subreddit: target.sub, topic } }];"
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000003",
+      "name": "Generate Post with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 800,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a Reddit post for r/{{ $json.subreddit }} on this topic: {{ $json.topic }}. Rules: genuine value first, no self-promotion in body, mention JobFrank only if naturally relevant in the last line. Use plain Reddit markdown. Output a JSON object with two fields: title (under 100 chars) and body (the post content).\"\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000004",
+      "name": "Parse Post JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content[0].text;\nconst match = raw.match(/\\{[\\s\\S]*\\}/);\nif (!match) throw new Error('Claude did not return valid JSON: ' + raw);\nconst parsed = JSON.parse(match[0]);\nconst prev = $('Pick Subreddit and Topic').first().json;\nreturn [{ json: { title: parsed.title, body: parsed.body, subreddit: prev.subreddit } }];"
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000005",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "parameters": {
+        "resume": "webhook"
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000006",
+      "name": "Check Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body?.approved }}",
+              "rightValue": false,
+              "operator": {"type": "boolean", "operation": "notEquals"}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000007",
+      "name": "Get Reddit Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1700, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.reddit.com/api/v1/access_token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "User-Agent", "value": "JobFrankBot/1.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "grant_type", "value": "password"},
+            {"name": "username", "value": "={{ $env.REDDIT_USERNAME }}"},
+            {"name": "password", "value": "={{ $env.REDDIT_PASSWORD }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000008",
+      "name": "Submit Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1950, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth.reddit.com/api/submit",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=bearer {{ $json.access_token }}"},
+            {"name": "User-Agent", "value": "JobFrankBot/1.0"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "api_type", "value": "json"},
+            {"name": "kind", "value": "self"},
+            {"name": "sr", "value": "={{ $('Parse Post JSON').item.json.subreddit }}"},
+            {"name": "title", "value": "={{ $('Parse Post JSON').item.json.title }}"},
+            {"name": "text", "value": "={{ $('Parse Post JSON').item.json.body }}"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "a4000001-0000-0000-0000-000000000009",
+      "name": "Discard",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1700, 400],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Daily 10am": {
+      "main": [[{"node": "Pick Subreddit and Topic", "type": "main", "index": 0}]]
+    },
+    "Pick Subreddit and Topic": {
+      "main": [[{"node": "Generate Post with Claude", "type": "main", "index": 0}]]
+    },
+    "Generate Post with Claude": {
+      "main": [[{"node": "Parse Post JSON", "type": "main", "index": 0}]]
+    },
+    "Parse Post JSON": {
+      "main": [[{"node": "Wait for Approval", "type": "main", "index": 0}]]
+    },
+    "Wait for Approval": {
+      "main": [[{"node": "Check Approved", "type": "main", "index": 0}]]
+    },
+    "Check Approved": {
+      "main": [
+        [{"node": "Get Reddit Token", "type": "main", "index": 0}],
+        [{"node": "Discard", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Reddit Token": {
+      "main": [[{"node": "Submit Post", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}
